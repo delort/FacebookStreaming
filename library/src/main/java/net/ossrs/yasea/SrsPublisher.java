@@ -3,6 +3,7 @@ package net.ossrs.yasea;
 import android.media.AudioRecord;
 import android.media.audiofx.AcousticEchoCanceler;
 import android.media.audiofx.AutomaticGainControl;
+import android.view.SurfaceView;
 
 import com.github.faucamp.simplertmp.RtmpHandler;
 import com.seu.magicfilter.utils.MagicFilterType;
@@ -20,7 +21,7 @@ public class SrsPublisher {
     private byte[] mPcmBuffer = new byte[4096];
     private Thread aworker;
 
-    private SrsCameraView mCameraView;
+    private SurfaceView mCameraView;
 
     private boolean sendVideoOnly = false;
     private boolean sendAudioOnly = false;
@@ -32,17 +33,24 @@ public class SrsPublisher {
     private SrsMp4Muxer mMp4Muxer;
     private SrsEncoder mEncoder;
 
-    public SrsPublisher(SrsCameraView view) {
+    public SrsPublisher(SurfaceView view) {
         mCameraView = view;
-        mCameraView.setPreviewCallback(new SrsCameraView.PreviewCallback() {
-            @Override
-            public void onGetRgbaFrame(byte[] data, int width, int height) {
-                calcSamplingFps();
-                if (!sendAudioOnly) {
-                    mEncoder.onGetRgbaFrame(data, width, height);
-                }
-            }
-        });
+//        mCameraView.setPreviewCallback(new SrsCameraView2.PreviewCallback() {
+//            @Override
+//            public void onGetRgbaFrame(byte[] data, int width, int height) {
+//                calcSamplingFps();
+//                if (!sendAudioOnly) {
+//                    mEncoder.onGetRgbaFrame(data, width, height);
+//                }
+//            }
+//        });
+    }
+
+    public void onGetRgbaFrame(byte[] data, int width, int height) {
+        calcSamplingFps();
+        if (!sendAudioOnly) {
+            mEncoder.onGetRgbaFrame(data, width, height);
+        }
     }
 
     private void calcSamplingFps() {
@@ -59,13 +67,13 @@ public class SrsPublisher {
         }
     }
 
-    public void startCamera() {
-        mCameraView.startCamera();
-    }
-
-    public void stopCamera() {
-        mCameraView.stopCamera();
-    }
+//    public void startCamera() {
+//        mCameraView.startCamera();
+//    }
+//
+//    public void stopCamera() {
+//        mCameraView.stopCamera();
+//    }
 
     public void startAudio() {
         mic = mEncoder.chooseAudioRecord();
@@ -149,14 +157,14 @@ public class SrsPublisher {
             return;
         }
 
-        mCameraView.enableEncoding();
+//        mCameraView.enableEncoding();
 
         startAudio();
     }
 
     public void stopEncode() {
         stopAudio();
-        stopCamera();
+//        stopCamera();
         mEncoder.stop();
     }
 
@@ -221,13 +229,10 @@ public class SrsPublisher {
         return mSamplingFps;
     }
 
-    public int getCamraId() {
-        return mCameraView.getCameraId();
-    }
 
     public void setPreviewResolution(int width, int height) {
-        int resolution[] = mCameraView.setPreviewResolution(width, height);
-        mEncoder.setPreviewResolution(resolution[0], resolution[1]);
+//        int resolution[] = mCameraView.setPreviewResolution(width, height);
+//        mEncoder.setPreviewResolution(resolution[0], resolution[1]);
     }
 
     public void setOutputResolution(int width, int height) {
@@ -239,7 +244,6 @@ public class SrsPublisher {
     }
 
     public void setScreenOrientation(int orientation) {
-        mCameraView.setPreviewOrientation(orientation);
         mEncoder.setScreenOrientation(orientation);
     }
 
@@ -267,23 +271,23 @@ public class SrsPublisher {
         sendAudioOnly = flag;
     }
 
-    public boolean switchCameraFilter(MagicFilterType type) {
-        return mCameraView.setFilter(type);
-    }
+//    public boolean switchCameraFilter(MagicFilterType type) {
+//        return mCameraView.setFilter(type);
+//    }
 
-    public void switchCameraFace(int id) {
-        mCameraView.stopCamera();
-        mCameraView.setCameraId(id);
-        if (id == 0) {
-            mEncoder.setCameraBackFace();
-        } else {
-            mEncoder.setCameraFrontFace();
-        }
-        if (mEncoder != null && mEncoder.isEnabled()) {
-            mCameraView.enableEncoding();
-        }
-        mCameraView.startCamera();
-    }
+//    public void switchCameraFace(int id) {
+//        mCameraView.stopCamera();
+//        mCameraView.setCameraId(id);
+//        if (id == 0) {
+//            mEncoder.setCameraBackFace();
+//        } else {
+//            mEncoder.setCameraFrontFace();
+//        }
+//        if (mEncoder != null && mEncoder.isEnabled()) {
+//            mCameraView.enableEncoding();
+//        }
+//        mCameraView.startCamera();
+//    }
 
     public void setRtmpHandler(RtmpHandler handler) {
         mFlvMuxer = new SrsFlvMuxer(handler);

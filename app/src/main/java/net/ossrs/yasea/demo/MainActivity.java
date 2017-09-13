@@ -1,15 +1,31 @@
 package net.ossrs.yasea.demo;
 
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.graphics.Point;
 import android.hardware.Camera;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.os.Bundle;
 import android.os.Environment;
 import android.support.v7.app.AppCompatActivity;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.Display;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.Surface;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -19,17 +35,19 @@ import android.widget.Toast;
 import com.github.faucamp.simplertmp.RtmpHandler;
 import com.seu.magicfilter.utils.MagicFilterType;
 
-import net.ossrs.yasea.SrsCameraView;
+import net.ossrs.yasea.SrsCameraView2;
 import net.ossrs.yasea.SrsEncodeHandler;
 import net.ossrs.yasea.SrsPublisher;
 import net.ossrs.yasea.SrsRecordHandler;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.SocketException;
+import java.nio.ByteBuffer;
 import java.util.Random;
 
 public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpListener,
-                        SrsRecordHandler.SrsRecordListener, SrsEncodeHandler.SrsEncodeListener {
+        SrsRecordHandler.SrsRecordListener, SrsEncodeHandler.SrsEncodeListener {
 
     private static final String TAG = "Yasea";
 
@@ -39,10 +57,17 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     private Button btnSwitchEncoder;
 
     private SharedPreferences sp;
-    private String rtmpUrl = "rtmp://ossrs.net/" + getRandomAlphaString(3) + '/' + getRandomAlphaDigitString(5);
+    //    private String rtmpUrl = "rtmp://ossrs.net/" + getRandomAlphaString(3) + '/' + getRandomAlphaDigitString(5);
+    private String rtmpUrl = "rtmp://live-api-a.facebook.com:80/rtmp/1622960237724816?ds=1&s_l=1&a=AThvow232B8sZcrn";
     private String recPath = Environment.getExternalStorageDirectory().getPath() + "/test.mp4";
 
     private SrsPublisher mPublisher;
+
+    private Surface mSurface;
+
+    SurfaceView mSurfaceView;
+
+    private int mScreenDensity;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,38 +80,54 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
 
         // restore data.
-        sp = getSharedPreferences("Yasea", MODE_PRIVATE);
-        rtmpUrl = sp.getString("rtmpUrl", rtmpUrl);
+//        sp = getSharedPreferences("Yasea", MODE_PRIVATE);
+//        rtmpUrl = sp.getString("rtmpUrl", rtmpUrl);
 
         // initialize url.
         final EditText efu = (EditText) findViewById(R.id.url);
         efu.setText(rtmpUrl);
+
+        DisplayMetrics metrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(metrics);
+        mScreenDensity = metrics.densityDpi;
+        mMediaProjectionManager = (MediaProjectionManager)
+                getSystemService(Context.MEDIA_PROJECTION_SERVICE);
 
         btnPublish = (Button) findViewById(R.id.publish);
         btnSwitchCamera = (Button) findViewById(R.id.swCam);
         btnRecord = (Button) findViewById(R.id.record);
         btnSwitchEncoder = (Button) findViewById(R.id.swEnc);
 
-        mPublisher = new SrsPublisher((SrsCameraView) findViewById(R.id.glsurfaceview_camera));
+        mSurfaceView = (SurfaceView) findViewById(R.id.glsurfaceview_camera);
+
+        mPublisher = new SrsPublisher(mSurfaceView);
         mPublisher.setEncodeHandler(new SrsEncodeHandler(this));
         mPublisher.setRtmpHandler(new RtmpHandler(this));
         mPublisher.setRecordHandler(new SrsRecordHandler(this));
         mPublisher.setPreviewResolution(640, 360);
         mPublisher.setOutputResolution(360, 640);
         mPublisher.setVideoHDMode();
-        mPublisher.startCamera();
+//        mPublisher.startCamera();
+
+        mSurface = mSurfaceView.getHolder().getSurface();
 
         btnPublish.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (btnPublish.getText().toString().contentEquals("publish")) {
-                    rtmpUrl = efu.getText().toString();
-                    SharedPreferences.Editor editor = sp.edit();
-                    editor.putString("rtmpUrl", rtmpUrl);
-                    editor.apply();
+//                    rtmpUrl = efu.getText().toString();
+//                    SharedPreferences.Editor editor = sp.edit();
+//                    editor.putString("rtmpUrl", rtmpUrl);
+//                    editor.apply();
 
                     mPublisher.startPublish(rtmpUrl);
-                    mPublisher.startCamera();
+//                    mPublisher.startCamera();
+
+                    if (mVirtualDisplay == null) {
+                        startScreenCapture();
+                    } else {
+                        stopScreenCapture();
+                    }
 
                     if (btnSwitchEncoder.getText().toString().contentEquals("soft encoder")) {
                         Toast.makeText(getApplicationContext(), "Use hard encoder", Toast.LENGTH_SHORT).show();
@@ -108,7 +149,7 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         btnSwitchCamera.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mPublisher.switchCameraFace((mPublisher.getCamraId() + 1) % Camera.getNumberOfCameras());
+//                mPublisher.switchCameraFace((mPublisher.getCamraId() + 1) % Camera.getNumberOfCameras());
             }
         });
 
@@ -143,6 +184,135 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         });
     }
 
+    private static final int REQUEST_MEDIA_PROJECTION = 1;
+    private int mResultCode;
+    private Intent mResultData;
+    private MediaProjection mMediaProjection;
+    private MediaProjectionManager mMediaProjectionManager;
+    private VirtualDisplay mVirtualDisplay;
+    private ImageReader mImageReader;
+    int mWidth, mHeight;
+
+    private void startScreenCapture() {
+        if (mSurface == null) {
+            return;
+        }
+        if (mMediaProjection != null) {
+            setUpVirtualDisplay();
+        } else if (mResultCode != 0 && mResultData != null) {
+            setUpMediaProjection();
+            setUpVirtualDisplay();
+        } else {
+            Log.e(TAG, "Requesting confirmation");
+            // This initiates a prompt dialog for the user to confirm screen projection.
+            startActivityForResult(
+                    mMediaProjectionManager.createScreenCaptureIntent(),
+                    REQUEST_MEDIA_PROJECTION);
+        }
+    }
+
+    private void stopScreenCapture() {
+        if (mVirtualDisplay == null) {
+            return;
+        }
+        mVirtualDisplay.release();
+        mVirtualDisplay = null;
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_MEDIA_PROJECTION) {
+            if (resultCode != Activity.RESULT_OK) {
+                Log.e(TAG, "User cancelled");
+                Toast.makeText(this, "cancelled", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            Log.e(TAG, "Starting screen capture");
+            mResultCode = resultCode;
+            mResultData = data;
+            setUpMediaProjection();
+            setUpVirtualDisplay();
+        }
+    }
+
+    private void setUpVirtualDisplay() {
+        Log.e(TAG, "Setting up a VirtualDisplay: " +
+                mSurfaceView.getWidth() + "x" + mSurfaceView.getHeight() +
+                " (" + mScreenDensity + ")");
+
+        Display display = getWindowManager().getDefaultDisplay();
+        Point size = new Point();
+        display.getSize(size);
+        mWidth = size.x;
+        mHeight = size.y;
+        mImageReader = ImageReader.newInstance(mWidth, mHeight, PixelFormat.RGBA_8888, 4);
+
+        mVirtualDisplay = mMediaProjection.createVirtualDisplay("ScreenCapture",
+                mSurfaceView.getWidth(), mSurfaceView.getHeight(), mScreenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                mImageReader.getSurface(), null, null);
+        mImageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener(){
+            @Override
+            public void onImageAvailable(ImageReader imageReader) {
+                Image image = null;
+                Bitmap bitmap = null;
+                // Replace Byte array to use normal array cause no resizing will occur
+                ByteArrayOutputStream jpegByteOutStream = new ByteArrayOutputStream();
+                //FileOutputStream fos = null; // testing
+                try {
+                    // Grab the image that the reader prepared us with
+                    image = mImageReader.acquireLatestImage();
+                    if (image != null) {
+
+                        Image.Plane[] planes = image.getPlanes();
+                        ByteBuffer buffer = planes[0].getBuffer();
+                        buffer.rewind();
+                        int pixelStride = planes[0].getPixelStride();
+                        int rowStride = planes[0].getRowStride();
+                        int capacity = mWidth * pixelStride * mHeight;
+                        byte[] data = new byte[mWidth * pixelStride];
+                        ByteBuffer bufferDes = ByteBuffer.allocate(capacity);
+                        for (int i = 0; i < mHeight; i++) {
+                            buffer.get(data, 0, mWidth * pixelStride);
+                            buffer.position((i + 1) * rowStride);
+                            bufferDes.put(data);
+                        }
+
+                        mPublisher.onGetRgbaFrame(bufferDes.array(), mWidth, mHeight);
+                        bufferDes.rewind();
+
+                        //Log.v(TAG, "Sent a single image!");
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    //TODO: Clean up stopping so we dont have to see this error
+                    //Log.d(TAG,"FUCK! Image error!");
+                } finally {
+                    if (jpegByteOutStream != null) {
+                        try {
+                            jpegByteOutStream.close();
+                        } catch (IOException ioe) {
+                            ioe.printStackTrace();
+                        }
+                    }
+                    if (bitmap != null) {
+                        bitmap.recycle();
+                    }
+                    if (image != null) {
+                        image.close();
+                    }
+                }
+            }
+        }, null);
+
+
+    }
+
+    private void setUpMediaProjection() {
+        mMediaProjection = mMediaProjectionManager.getMediaProjection(mResultCode, mResultData);
+    }
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu; this adds items to the action bar if it is present.
@@ -161,54 +331,54 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         if (id == R.id.action_settings) {
             return true;
         } else {
-            switch (id) {
-                case R.id.cool_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.COOL);
-                    break;
-                case R.id.beauty_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.BEAUTY);
-                    break;
-                case R.id.early_bird_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.EARLYBIRD);
-                    break;
-                case R.id.evergreen_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.EVERGREEN);
-                    break;
-                case R.id.n1977_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.N1977);
-                    break;
-                case R.id.nostalgia_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.NOSTALGIA);
-                    break;
-                case R.id.romance_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.ROMANCE);
-                    break;
-                case R.id.sunrise_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.SUNRISE);
-                    break;
-                case R.id.sunset_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.SUNSET);
-                    break;
-                case R.id.tender_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.TENDER);
-                    break;
-                case R.id.toast_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.TOASTER2);
-                    break;
-                case R.id.valencia_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.VALENCIA);
-                    break;
-                case R.id.walden_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.WALDEN);
-                    break;
-                case R.id.warm_filter:
-                    mPublisher.switchCameraFilter(MagicFilterType.WARM);
-                    break;
-                case R.id.original_filter:
-                default:
-                    mPublisher.switchCameraFilter(MagicFilterType.NONE);
-                    break;
-            }
+//            switch (id) {
+//                case R.id.cool_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.COOL);
+//                    break;
+//                case R.id.beauty_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.BEAUTY);
+//                    break;
+//                case R.id.early_bird_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.EARLYBIRD);
+//                    break;
+//                case R.id.evergreen_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.EVERGREEN);
+//                    break;
+//                case R.id.n1977_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.N1977);
+//                    break;
+//                case R.id.nostalgia_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.NOSTALGIA);
+//                    break;
+//                case R.id.romance_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.ROMANCE);
+//                    break;
+//                case R.id.sunrise_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.SUNRISE);
+//                    break;
+//                case R.id.sunset_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.SUNSET);
+//                    break;
+//                case R.id.tender_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.TENDER);
+//                    break;
+//                case R.id.toast_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.TOASTER2);
+//                    break;
+//                case R.id.valencia_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.VALENCIA);
+//                    break;
+//                case R.id.walden_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.WALDEN);
+//                    break;
+//                case R.id.warm_filter:
+//                    mPublisher.switchCameraFilter(MagicFilterType.WARM);
+//                    break;
+//                case R.id.original_filter:
+//                default:
+//                    mPublisher.switchCameraFilter(MagicFilterType.NONE);
+//                    break;
+//            }
         }
         setTitle(item.getTitle());
 
@@ -246,7 +416,7 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
         if (btnPublish.getText().toString().contentEquals("stop")) {
             mPublisher.startEncode();
         }
-        mPublisher.startCamera();
+//        mPublisher.startCamera();
     }
 
     private static String getRandomAlphaString(int length) {
@@ -407,4 +577,6 @@ public class MainActivity extends AppCompatActivity implements RtmpHandler.RtmpL
     public void onEncodeIllegalArgumentException(IllegalArgumentException e) {
         handleException(e);
     }
+
+
 }
